@@ -124,8 +124,8 @@ param_distxg = {'n_estimators': stats.randint(50, 150),
 
 dftest0 = pd.read_csv(r'testEgEf.txt')
 dftrain0 = pd.read_csv(r'trainEgEf.txt')
-dftest = dftest0.drop("Eg", 1)
-dftrain = dftrain0.drop("Eg", 1)
+dftest = dftest0.drop("Ef", 1)
+dftrain = dftrain0.drop("Ef", 1)
 
 # Model 3 - Support Vector Regression (SVR)
 from sklearn.svm import SVR
@@ -146,12 +146,12 @@ from sklearn.preprocessing import StandardScaler
 sc = StandardScaler()
 
 
-X_train1 = dftrain.drop("Ef", 1)
-X_test1 = dftest.drop("Ef", 1)
+X_train1 = dftrain.drop("Eg", 1)
+X_test1 = dftest.drop("Eg", 1)
 X_train1=sc.fit_transform(X_train1)
 X_test1=sc.fit_transform(X_test1)
-y_train1 = np.asarray(dftrain['Ef']).astype('float')
-y_test1 = np.asarray(dftest['Ef']).astype('float')
+y_train1 = np.asarray(dftrain['Eg']).astype('float')
+y_test1 = np.asarray(dftest['Eg']).astype('float')
 
 steps = [('scaler', StandardScaler()), ('SVM', SVR())]
 pipeline = Pipeline(steps)
@@ -262,12 +262,12 @@ for j in range(2000):
 
                 errsum = errsum + trainconvexhull[i][int(np.array(trainconvexhull).shape[1] - 8)]
                 if (trainconvexhull[i][int(np.array(trainconvexhull).shape[1] - 8)] <= np.percentile(
-                        np.array(trainconvexhull).T[np.array(trainconvexhull).shape[1] - 8], 5)):
+                        np.array(trainconvexhull).T[np.array(trainconvexhull).shape[1] - 8],5)):
                     coststep = np.append(coststep, 0.0)
                     Ng = Ng + 1
 
                 elif (trainconvexhull[i][int(np.array(trainconvexhull).shape[1] - 8)] > np.percentile(
-                        np.array(trainconvexhull).T[np.array(trainconvexhull).shape[1] - 8], 5)):
+                        np.array(trainconvexhull).T[np.array(trainconvexhull).shape[1] - 8],5)):
                     Ng = Ng + 1
                     coststep = np.append(coststep, (
                         math.exp(3.0 * trainconvexhull[i][int(np.array(trainconvexhull).shape[1] - 8)])))
@@ -368,9 +368,10 @@ for j in range(2000):
             trainconvexhull2 = trainconvexhullint
             print(Errlim[j], 'low err')
 
-        if (0.55 * Errlim[0] < Errlim[j] < 0.85 * Errlim[0] and Ng > 50):
-
-            if (np.array(trainconvexhullint).shape[0] < 40):
+        #if (0.55 * Errlim[0] < Errlim[j] < 0.85 * Errlim[0] and Ng > 50):
+        if (0.65 * Errlim[0] < Errlim[j] < Errlim[0] and Ng > 50):
+            #if (np.array(trainconvexhullint).shape[0] < 40):
+            if (np.array(trainconvexhullint).shape[0] < 60):
                 break
 
             trainhull = ptconverr
@@ -433,7 +434,7 @@ for j in range(2000):
             ax2.spines['left'].set_color('black')
             plt.xlabel('Convex Hull Distance', fontsize=18)
             plt.ylabel('Error (eV/atom)', fontsize=18)
-            plt.savefig(r'PlotTCOEfDIstances.svg')
+            plt.savefig(r'PlotTCOEgDIstances.svg')
 
 
             xrline = np.percentile(np.array(trainconvexhull).T[np.array(trainconvexhull).shape[1] - 8], 5)
@@ -465,7 +466,7 @@ for j in range(2000):
             sns.kdeplot(err6i, color='green', common_norm="true",
                         label='Outside Hull', lw=3)
             plt.title('Error Distribution', fontsize=18)
-            plt.xlim(0.0, 0.3)
+            plt.xlim(0.0, 1.0)
             plt.axvline(x=xrline, color='b', label='error cutoff')
             ax2.set_facecolor('w')
             ax2.spines['bottom'].set_color('black')
@@ -476,4 +477,4 @@ for j in range(2000):
             legend18.get_frame().set_facecolor('w')
             plt.xlabel('Error (eV/atom)', fontsize=18)
             plt.ylabel('Frequency', fontsize=18)
-            plt.savefig(r'DistributionConvexHullTCOEf.svg')
+            plt.savefig(r'DistributionConvexHullTCOEg.svg')
