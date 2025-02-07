@@ -1,178 +1,150 @@
 import numpy as np
 import pandas as pd
-from sklearn.preprocessing import StandardScaler
-from sklearn.pipeline import Pipeline
-from sklearn.model_selection import GridSearchCV, train_test_split
-from sklearn.svm import SVR
-from sklearn.decomposition import PCA
-from scipy.spatial import ConvexHull
 import matplotlib.pyplot as plt
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import train_test_split, GridSearchCV
+from sklearn.pipeline import Pipeline
+from sklearn.svm import SVR
+from scipy.spatial import ConvexHull
+from sklearn.decomposition import PCA
 from matplotlib.ticker import MultipleLocator
 import seaborn as sns
-import warnings
-warnings.filterwarnings('ignore')
+import math
 
-class DataProcessor:
-    def __init__(self, test_path, train_path):
-        self.sc = StandardScaler()
+
+class MLErrorAnalyzer:
+    def __init__(self, train_file, test_file):
+        """Initialize with training and test data files."""
+        self.train_data = pd.read_csv(train_file)
+        self.test_data = pd.read_csv(test_file)
+        self.scaler = StandardScaler()
         self.pca = PCA(n_components=5)
-        self.test_path = test_path
-        self.train_path = train_path
-        
-    def load_and_preprocess(self):
-        dftest0 = pd.read_csv(self.test_path)
-        dftrain0 = pd.read_csv(self.train_path)
-        
-        # Remove Ef column and split features/target
-        dftest = dftest0.drop("Ef", axis=1)
-        dftrain = dftrain0.drop("Ef", axis=1)
-        
-        X_train = dftrain.drop("Eg", axis=1)
-        X_test = dftest.drop("Eg", axis=1)
-        
+
+    def prepare_data(self):
+        """Prepare and split data for training."""
+        # Prepare features and target
+        X_train = self.train_data.drop("Eg", axis=1)
+        X_test = self.test_data.drop("Eg", axis=1)
+        y_train = self.train_data['Eg'].astype('float')
+        y_test = self.test_data['Eg'].astype('float')
+
         # Scale features
-        X_train = self.sc.fit_transform(X_train)
-        X_test = self.sc.transform(X_test)
-        
-        y_train = dftrain['Eg'].astype('float')
-        y_test = dftest['Eg'].astype('float')
-        
-        return X_train, X_test, y_train, y_test
+        X_train_scaled = self.scaler.fit_transform(X_train)
+        X_test_scaled = self.scaler.transform(X_test)
 
-class ModelTrainer:
-    def __init__(self):
-        self.pipeline = Pipeline([
+        return X_train_scaled, X_test_scaled, y_train, y_test
+
+    def train_model(self, X_train, y_train):
+        """Train SVR model with pipeline."""
+        pipeline = Pipeline([
             ('scaler', StandardScaler()),
-            ('svr', SVR(kernel='rbf', C=100, gamma='auto', epsilon=0.001))
+            ('svr', SVR())
         ])
-        
-    def train_and_predict(self, X_train, X_test, y_train):
-        self.pipeline.fit(X_train, y_train)
-        return self.pipeline.predict(X_test)
 
-class ConvexHullAnalyzer:
-    def __init__(self):
-        self.error_threshold = 0.022
-        
-    def point_in_hull(self, point, hull):
-        return all((np.dot(eq[:-1], point) + eq[-1] <= 1e-12) for eq in hull.equations)
-    
-    def analyze_errors(self, data_matrix, n_iterations=2000):
-        costs = []
+        param_grid = {
+            'svr__C': [100],
+            'svr__gamma': ['auto'],
+            'svr__kernel': ['rbf'],
+            'svr__epsilon': [0.001]
+        }
+
+        grid_search = GridSearchCV(pipeline, param_grid, cv=5)
+        grid_search.fit(X_train, y_train)
+        return grid_search
+
+    def calculate_error_metrics(self, model, X_test, y_test):
+        """Calculate prediction errors and related metrics."""
+        y_pred = model.predict(X_test)
+        errors = np.abs(y_pred - y_test)
+
+        # Stack features, errors, and predictions
+        feature_matrix = np.column_stack((
+            X_test,
+            errors,
+            y_test,
+            y_pred,
+            self.pca.fit_transform(X_test)
+        ))
+
+        return feature_matrix
+
+    def convex_hull_analysis(self, data, test_size=0.2):
+        """Perform convex hull analysis on the data."""
+        train_data, test_data = train_test_split(data, test_size=test_size, random_state=0)
+
+        # Extract PCA components for hull calculation
+        pca_cols = data.shape[1] - 5  # Last 5 columns are PCA components
+        hull = ConvexHull(train_data[:, -5:])
+
+        hull_distances = []
         errors = []
-        current_data = data_matrix.copy()
-        best_result = None
-        
-        for i in range(n_iterations):
-            cost, error, n_points, hull_data = self._evaluate_iteration(current_data)
-            costs.append(cost)
-            errors.append(error)
-            
-            if error < self.error_threshold:
-                best_result = hull_data
-                break
-                
-            if i > 0 and cost < costs[-2] and error < errors[-2]:
-                current_data = hull_data
-            else:
-                current_data = self._update_data(current_data, hull_data)
-                
-            if 0.65 * errors[0] < error < errors[0] and n_points > 50:
-                if len(hull_data) < 60:
-                    break
-        
-        return best_result, costs, errors
-    
-    def _evaluate_iteration(self, data):
-        hull = ConvexHull(data[:, -5:])
-        points_in_hull = []
-        total_error = 0
-        n_points = 0
-        cost = 0
-        
-        for point in data:
-            if self.point_in_hull(point[-5:], hull):
-                error = point[-8]
-                total_error += error
-                n_points += 1
-                cost += 0.0 if error <= np.percentile(data[:, -8], 5) else np.exp(3.0 * error)
-                points_in_hull.append(point)
-        
-        cost = -n_points + cost
-        error = total_error / n_points if n_points > 0 else 1.0
-        
-        return cost, error, n_points, np.array(points_in_hull)
-    
-    def _update_data(self, current_data, hull_data):
-        _, test_data = train_test_split(current_data, test_size=0.1, random_state=0)
-        return np.vstack((test_data[:6], hull_data))
 
-class Visualizer:
-    @staticmethod
-    def plot_hull_distances(hull_data, save_path='hull_distances.svg'):
-        fig, ax = plt.subplots(figsize=(10, 6))
-        plt.plot(hull_data[:, -5], hull_data[:, -8], 'bo')
-        
-        ax.grid(True)
-        ax.set_xlabel('Convex Hull Distance', fontsize=18)
-        ax.set_ylabel('Error (eV/atom)', fontsize=18)
-        ax.set_xlim(-0.017, 0.05)
-        
-        for spine in ax.spines.values():
-            spine.set_color('black')
-            
-        plt.savefig(save_path)
+        for point in test_data:
+            # Calculate hull distance
+            hull_eq = np.dot(hull.equations[:, :-1], point[-5:]) + hull.equations[:, -1]
+            max_dist = np.max(hull_eq)
+
+            hull_distances.append(max_dist)
+            errors.append(point[pca_cols - 3])  # Error column
+
+        return np.array(hull_distances), np.array(errors)
+
+    def plot_error_distribution(self, hull_distances, errors, output_file):
+        """Plot error distribution based on hull distances."""
+        # Define distance thresholds
+        min_dist = np.min(hull_distances)
+        max_dist = np.max(hull_distances)
+        mid_threshold = 0.2
+
+        # Categorize errors
+        inner_errors = errors[hull_distances <= min_dist * 0.2]
+        edge_errors = errors[(hull_distances > min_dist * 0.2) & (hull_distances <= max_dist * 0.2)]
+        outer_errors = errors[hull_distances > max_dist * 0.2]
+
+        # Create plot
+        plt.figure(figsize=(10, 6))
+        sns.kdeplot(inner_errors, color='red', label='Inside Hull', lw=3)
+        sns.kdeplot(edge_errors, color='blue', label='Edge of Hull', lw=3)
+        sns.kdeplot(outer_errors, color='green', label='Outside Hull', lw=3)
+
+        plt.title('Error Distribution', fontsize=18)
+        plt.xlabel('Error (eV/atom)', fontsize=18)
+        plt.ylabel('Frequency', fontsize=18)
+        plt.xlim(0.0, 1.0)
+
+        # Add error cutoff line
+        error_cutoff = np.percentile(errors, 5)
+        plt.axvline(x=error_cutoff, color='b', linestyle='--', label='Error Cutoff')
+
+        plt.legend(loc='upper right', shadow=True)
+        plt.tight_layout()
+        plt.savefig(output_file)
         plt.close()
-    
-    @staticmethod
-    def plot_error_distribution(error_groups, cutoff, save_path='error_distribution.svg'):
-        fig, ax = plt.subplots(figsize=(10, 6))
-        
-        colors = ['red', 'blue', 'green']
-        labels = ['Inside Hull', 'Edge of Hull', 'Outside Hull']
-        
-        for errors, color, label in zip(error_groups, colors, labels):
-            sns.kdeplot(errors, color=color, label=label, lw=3)
-            
-        plt.axvline(x=cutoff, color='b', label='error cutoff')
-        ax.set_xlabel('Error (eV/atom)', fontsize=18)
-        ax.set_ylabel('Frequency', fontsize=18)
-        ax.set_xlim(0.0, 1.0)
-        
-        plt.legend(loc='upper right', fontsize='medium')
-        plt.savefig(save_path)
-        plt.close()
+
 
 def main():
-    # Initialize components
-    processor = DataProcessor('testEgEf.txt', 'trainEgEf.txt')
-    trainer = ModelTrainer()
-    analyzer = ConvexHullAnalyzer()
-    visualizer = Visualizer()
-    
-    # Load and process data
-    X_train, X_test, y_train, y_test = processor.load_and_preprocess()
-    
-    # Train model and get predictions
-    y_pred = trainer.train_and_predict(X_train, X_test, y_train)
-    
-    # Prepare data matrix for convex hull analysis
-    prediction_errors = np.abs(y_pred - y_test)
-    initial_data = np.hstack((
-        X_test,
-        prediction_errors.reshape(-1, 1),
-        y_test.reshape(-1, 1),
-        y_pred.reshape(-1, 1),
-        processor.pca.fit_transform(X_test)
-    ))
-    
-    # Run convex hull analysis
-    best_hull_data, costs, errors = analyzer.analyze_errors(initial_data)
-    
-    # Visualize results
-    visualizer.plot_hull_distances(best_hull_data)
-    error_groups = analyzer._group_errors_by_hull_position(best_hull_data)
-    visualizer.plot_error_distribution(error_groups, np.percentile(initial_data[:, -8], 5))
+    # Initialize analyzer
+    analyzer = MLErrorAnalyzer('trainEgEf.txt', 'testEgEf.txt')
+
+    # Prepare data
+    X_train, X_test, y_train, y_test = analyzer.prepare_data()
+
+    # Train model
+    model = analyzer.train_model(X_train, y_train)
+
+    # Calculate errors
+    feature_matrix = analyzer.calculate_error_metrics(model, X_test, y_test)
+
+    # Perform convex hull analysis
+    hull_distances, errors = analyzer.convex_hull_analysis(feature_matrix)
+
+    # Plot results
+    analyzer.plot_error_distribution(
+        hull_distances,
+        errors,
+        'error_distribution.svg'
+    )
+
 
 if __name__ == "__main__":
     main()
